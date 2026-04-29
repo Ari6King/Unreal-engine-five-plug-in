@@ -92,7 +92,8 @@ class VoiceModifyRequest(BaseModel):
 @app.post("/api/voice/modify")
 async def modify(file: UploadFile = File(...), settings: str = Form("{}")):
     file_id = str(uuid.uuid4())
-    input_path = os.path.join(UPLOAD_DIR, f"{file_id}_{file.filename}")
+    safe_name = os.path.basename(file.filename or "audio.wav")
+    input_path = os.path.join(UPLOAD_DIR, f"{file_id}_{safe_name}")
     with open(input_path, "wb") as f:
         content = await file.read()
         f.write(content)
@@ -135,7 +136,10 @@ async def get_sounds():
 
 @app.get("/api/soundboard/play/{sound_id}")
 async def play_sound(sound_id: str):
-    path = os.path.join(SOUNDBOARD_DIR, sound_id)
+    safe_id = os.path.basename(sound_id)
+    path = os.path.join(SOUNDBOARD_DIR, safe_id)
+    if not os.path.realpath(path).startswith(os.path.realpath(SOUNDBOARD_DIR)):
+        raise HTTPException(status_code=400, detail="Invalid sound id")
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Sound not found")
     media_type = "audio/mp3" if sound_id.endswith(".mp3") else "audio/wav"
@@ -144,7 +148,7 @@ async def play_sound(sound_id: str):
 
 @app.post("/api/soundboard/upload")
 async def upload_sound(file: UploadFile = File(...), name: str = Form("")):
-    filename = name or file.filename or f"{uuid.uuid4()}.wav"
+    filename = os.path.basename(name or file.filename or f"{uuid.uuid4()}.wav")
     if not filename.endswith((".mp3", ".wav", ".ogg")):
         filename += ".wav"
     path = os.path.join(SOUNDBOARD_DIR, filename)
@@ -158,7 +162,8 @@ async def upload_sound(file: UploadFile = File(...), name: str = Form("")):
 @app.post("/api/studio/upload")
 async def studio_upload(file: UploadFile = File(...)):
     file_id = str(uuid.uuid4())
-    ext = os.path.splitext(file.filename or "audio.wav")[1]
+    safe_name = os.path.basename(file.filename or "audio.wav")
+    ext = os.path.splitext(safe_name)[1]
     path = os.path.join(UPLOAD_DIR, f"{file_id}{ext}")
     with open(path, "wb") as f:
         content = await file.read()
@@ -213,7 +218,8 @@ async def studio_mix(req: MixRequest):
 @app.post("/api/studio/process")
 async def studio_process(file: UploadFile = File(...), effect: str = Form("normalize")):
     file_id = str(uuid.uuid4())
-    input_path = os.path.join(UPLOAD_DIR, f"{file_id}_{file.filename}")
+    safe_name = os.path.basename(file.filename or "audio.wav")
+    input_path = os.path.join(UPLOAD_DIR, f"{file_id}_{safe_name}")
     with open(input_path, "wb") as f:
         content = await file.read()
         f.write(content)
