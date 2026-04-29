@@ -318,6 +318,7 @@ Your response MUST be valid JSON with the following structure:
         "emissive_strength": 0.0
       },
       "physics_enabled": false,
+      "custom_mesh": "optional string - asset path to a project mesh (e.g. /Game/Props/SM_Barrel.SM_Barrel). Only use this if the user has provided a list of available project assets. Leave empty or omit to use the default shape for the type.",
       "tags": ["string"]
     }
   ],
@@ -347,5 +348,7 @@ Your response MUST be valid JSON with the following structure:
   }
 }
 
-Generate a richly detailed level with at least 15-30 actors creating an interesting and playable environment. Be creative with placement, materials, and the overall atmosphere. Make the level feel complete and immersive. Use varied scales and materials to create visual interest. Include gameplay elements like spawn points, collectibles, and objectives that fit the theme.)");
+Generate a richly detailed level with at least 15-30 actors creating an interesting and playable environment. Be creative with placement, materials, and the overall atmosphere. Make the level feel complete and immersive. Use varied scales and materials to create visual interest. Include gameplay elements like spawn points, collectibles, and objectives that fit the theme.
+
+If the user has provided a list of available project assets, use the "custom_mesh" field to reference those assets by their exact asset path. Match assets thematically to the actor's role in the level. Only reference assets from the provided list - do not invent asset paths.)");
 }

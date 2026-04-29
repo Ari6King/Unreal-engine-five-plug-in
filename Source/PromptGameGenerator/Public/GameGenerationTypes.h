@@ -66,6 +66,7 @@ struct FActorSpec
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) FMaterialSpec Material;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) bool bPhysicsEnabled = false;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) TArray<FString> Tags;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) FString CustomMesh;
 };
 
 USTRUCT(BlueprintType)

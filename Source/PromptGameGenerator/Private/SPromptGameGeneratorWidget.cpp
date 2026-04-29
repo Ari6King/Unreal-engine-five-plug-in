@@ -31,6 +31,10 @@ void SPromptGameGeneratorWidget::Construct(const FArguments& InArgs)
 	GameGenerator->OnProgress.BindRaw(this, &SPromptGameGeneratorWidget::OnGenerationProgress);
 	GameGenerator->OnComplete.BindRaw(this, &SPromptGameGeneratorWidget::OnGenerationComplete);
 
+	PropScanner = NewObject<UPropScanner>();
+	PropScanner->AddToRoot();
+	PropScanner->ScanProjectAssets();
+
 	ChildSlot
 	[
 		SNew(SScrollBox)
@@ -88,6 +92,14 @@ void SPromptGameGeneratorWidget::Construct(const FArguments& InArgs)
 			.Padding(0, 0, 0, 8)
 			[
 				BuildPromptSection()
+			]
+
+			// Prop checklist section
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0, 0, 0, 8)
+			[
+				BuildPropChecklistSection()
 			]
 
 			// Progress section
@@ -488,6 +500,42 @@ FReply SPromptGameGeneratorWidget::OnGenerateClicked()
 		return FReply::Handled();
 	}
 
+	ShowPropChecklist();
+	return FReply::Handled();
+}
+
+void SPromptGameGeneratorWidget::ShowPropChecklist()
+{
+	bChecklistVisible = true;
+	if (PropScanner)
+	{
+		PropScanner->ScanProjectAssets();
+	}
+	AppendLog(TEXT("Select which project assets/props to include in your generated game."));
+	AppendLog(FString::Printf(TEXT("Found %d project assets available."), PropScanner ? PropScanner->GetTotalCount() : 0));
+}
+
+void SPromptGameGeneratorWidget::OnPropSelectionConfirmed()
+{
+	bChecklistVisible = false;
+	int32 SelectedCount = PropScanner ? PropScanner->GetSelectedCount() : 0;
+	AppendLog(FString::Printf(TEXT("Selected %d props to include in generation."), SelectedCount));
+	ProceedWithGeneration();
+}
+
+void SPromptGameGeneratorWidget::OnPropSelectionCancelled()
+{
+	bChecklistVisible = false;
+	if (PropScanner)
+	{
+		PropScanner->DeselectAll();
+	}
+	AppendLog(TEXT("Skipping prop selection - using basic shapes only."));
+	ProceedWithGeneration();
+}
+
+void SPromptGameGeneratorWidget::ProceedWithGeneration()
+{
 	bIsGenerating = true;
 	CurrentProgress = 0.0f;
 	StatusText = TEXT("Starting generation...");
@@ -500,13 +548,33 @@ FReply SPromptGameGeneratorWidget::OnGenerateClicked()
 	{
 		AppendLog(TEXT("ERROR: No editor world available. Please open a level."));
 		bIsGenerating = false;
-		return FReply::Handled();
+		return;
 	}
 
 	GameGenerator->Initialize(LLMSettings);
-	GameGenerator->GenerateFromPrompt(PromptText.ToString(), World);
 
-	return FReply::Handled();
+	FString PropsContext = PropScanner ? PropScanner->BuildPropsContextForLLM() : TEXT("");
+	FString FullPrompt = PromptText.ToString();
+	if (!PropsContext.IsEmpty())
+	{
+		FullPrompt += PropsContext;
+		AppendLog(TEXT("Prop asset context appended to prompt for AI."));
+	}
+
+	GameGenerator->GenerateFromPrompt(FullPrompt, World);
+}
+
+TSharedRef<SWidget> SPromptGameGeneratorWidget::BuildPropChecklistSection()
+{
+	return SAssignNew(ChecklistContainer, SBox)
+		.Visibility_Lambda([this]() { return bChecklistVisible ? EVisibility::Visible : EVisibility::Collapsed; })
+		.MaxDesiredHeight(400)
+		[
+			SNew(SPropChecklistWidget)
+			.PropScanner(PropScanner)
+			.OnConfirmed(FOnPropSelectionConfirmed::CreateRaw(this, &SPromptGameGeneratorWidget::OnPropSelectionConfirmed))
+			.OnCancelled(FOnPropSelectionCancelled::CreateRaw(this, &SPromptGameGeneratorWidget::OnPropSelectionCancelled))
+		];
 }
 
 FReply SPromptGameGeneratorWidget::OnCancelClicked()

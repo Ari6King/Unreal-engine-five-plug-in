@@ -164,6 +164,12 @@ FActorSpec FGameLevelParser::ParseActor(const TSharedPtr<FJsonObject>& Obj)
 
 	Obj->TryGetBoolField(TEXT("physics_enabled"), Actor.bPhysicsEnabled);
 
+	FString CustomMesh;
+	if (Obj->TryGetStringField(TEXT("custom_mesh"), CustomMesh))
+	{
+		Actor.CustomMesh = CustomMesh;
+	}
+
 	const TArray<TSharedPtr<FJsonValue>>* TagsArray;
 	if (Obj->TryGetArrayField(TEXT("tags"), TagsArray))
 	{

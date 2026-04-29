@@ -9,6 +9,8 @@
 #include "Widgets/Notifications/SProgressBar.h"
 #include "GameGenerator.h"
 #include "LLMClient.h"
+#include "PropChecklist.h"
+#include "SPropChecklistWidget.h"
 
 class PROMPTGAMEGENERATOR_API SPromptGameGeneratorWidget : public SCompoundWidget
 {
@@ -41,11 +43,18 @@ private:
 	TSharedRef<SWidget> BuildProgressSection();
 	TSharedRef<SWidget> BuildLogSection();
 	TSharedRef<SWidget> BuildPresetButtons();
+	TSharedRef<SWidget> BuildPropChecklistSection();
 
 	void AppendLog(const FString& Message);
 	void LoadSettings();
 	void SaveSettings();
 	FString GetSettingsFilePath() const;
+
+	// Prop checklist
+	void ShowPropChecklist();
+	void OnPropSelectionConfirmed();
+	void OnPropSelectionCancelled();
+	void ProceedWithGeneration();
 
 	// State
 	UPROPERTY()
@@ -58,6 +67,10 @@ private:
 	FString StatusText = TEXT("Ready");
 	bool bSettingsVisible = false;
 	bool bIsGenerating = false;
+	bool bChecklistVisible = false;
+
+	UPROPERTY()
+	UPropScanner* PropScanner;
 
 	// Widget refs
 	TSharedPtr<SMultiLineEditableTextBox> PromptTextBox;
@@ -70,4 +83,5 @@ private:
 	TSharedPtr<SEditableTextBox> EndpointTextBox;
 	TSharedPtr<SButton> GenerateButton;
 	TSharedPtr<SButton> CancelButton;
+	TSharedPtr<SBox> ChecklistContainer;
 };

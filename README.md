@@ -13,6 +13,8 @@ An AI-powered Unreal Engine 5 editor plugin that generates complete game levels 
 - **Dynamic Materials** — Color, metallic, roughness, and emissive properties per actor
 - **Gameplay Elements** — Player start, spawn points, collectibles, checkpoints, enemy spawns, trigger zones, and objectives
 - **Post-Processing** — Bloom, auto-exposure, vignette, ambient occlusion, and color grading
+- **Prop Checklist** — After entering a prompt, a prop selection panel scans your project for available assets (meshes, materials, blueprints, sounds, particles, textures) and lets you pick which ones to include in the generated level
+- **Custom Asset Integration** — Selected project assets are sent to the AI as context, which maps them to level actors using `custom_mesh` references for thematically appropriate placement
 - **Persistent Settings** — API key and preferences saved between sessions
 - **Non-Destructive** — All generated content is tagged and can be cleared before regeneration
 
@@ -75,6 +77,9 @@ An AI-powered Unreal Engine 5 editor plugin that generates complete game levels 
 3. **Generate a Game Level**
    - Type a description or click a **Quick Preset** button
    - Click **🚀 Generate Game**
+   - A **Prop Checklist** will appear showing all available project assets (meshes, materials, etc.)
+   - Select which assets you want the AI to use as props in the level, or click **Skip (No Props)** to use basic shapes only
+   - Click **Confirm & Generate** to start building
    - Watch the progress bar and log as your level is built
    - The generated level appears in your current editor viewport
 
@@ -117,7 +122,9 @@ PromptGameGenerator/
 │   │   ├── LLMClient.h                # LLM API client (OpenAI/Anthropic/Local)
 │   │   ├── GameGenerationTypes.h       # Data structures for level specification
 │   │   ├── GameLevelParser.h           # JSON → struct parser
-│   │   └── WorldBuilder.h             # UE5 world construction
+│   │   ├── WorldBuilder.h             # UE5 world construction
+│   │   ├── PropChecklist.h            # Asset scanner and prop selection
+│   │   └── SPropChecklistWidget.h     # Prop checklist UI widget
 │   └── Private/
 │       ├── PromptGameGeneratorModule.cpp
 │       ├── PromptGameGeneratorCommands.cpp
@@ -125,7 +132,9 @@ PromptGameGenerator/
 │       ├── GameGenerator.cpp
 │       ├── LLMClient.cpp
 │       ├── GameLevelParser.cpp
-│       └── WorldBuilder.cpp
+│       ├── WorldBuilder.cpp
+│       ├── PropChecklist.cpp
+│       └── SPropChecklistWidget.cpp
 ├── Content/                            # Plugin content assets
 └── Resources/                          # Plugin resources (icons)
 ```
@@ -134,6 +143,8 @@ PromptGameGenerator/
 
 | Component | Role |
 |-----------|------|
+| `PropScanner` | Scans project assets (meshes, materials, blueprints, etc.) and builds LLM context from selections |
+| `SPropChecklistWidget` | UI panel for browsing and selecting project assets with search, category filters, and bulk actions |
 | `LLMClient` | HTTP client supporting OpenAI, Anthropic, and Ollama APIs with structured JSON output |
 | `GameLevelParser` | Parses the LLM's JSON response into typed `FGameLevelSpec` structs |
 | `GameGenerator` | Orchestrates the full pipeline: prompt → LLM → parse → build |
@@ -147,16 +158,19 @@ PromptGameGenerator/
 User Prompt
     │
     ▼
-LLMClient (sends to OpenAI/Anthropic/Ollama)
+Prop Checklist (select project assets to include)
     │
     ▼
-JSON Level Specification
+LLMClient (sends prompt + selected props to OpenAI/Anthropic/Ollama)
+    │
+    ▼
+JSON Level Specification (with custom_mesh references)
     │
     ▼
 GameLevelParser (JSON → FGameLevelSpec)
     │
     ▼
-WorldBuilder
+WorldBuilder (loads custom meshes or falls back to basic shapes)
     ├── ClearExistingGenerated()
     ├── SetupEnvironment() → Fog, atmosphere
     ├── BuildTerrain() → Procedural mesh with Perlin noise

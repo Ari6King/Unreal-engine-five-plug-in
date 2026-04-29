@@ -39,7 +39,10 @@ public class PromptGameGenerator : ModuleRules
 			"AssetTools",
 			"ContentBrowser",
 			"MaterialEditor",
-			"PhysicsCore"
+			"PhysicsCore",
+			"Niagara",
+			"AssetRegistry",
+			"DesktopPlatform"
 		});
 	}
 }

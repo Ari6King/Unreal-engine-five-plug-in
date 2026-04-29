@@ -332,40 +332,58 @@ AActor* UWorldBuilder::SpawnPrimitiveActor(UWorld* World, const FActorSpec& Spec
 	UStaticMesh* Mesh = nullptr;
 	FString MeshPath;
 
-	if (Spec.Type == TEXT("cube") || Spec.Type == TEXT("wall") || Spec.Type == TEXT("platform") || Spec.Type == TEXT("decoration"))
+	// Try custom mesh from prop checklist first
+	if (!Spec.CustomMesh.IsEmpty())
 	{
-		MeshPath = TEXT("/Engine/BasicShapes/Cube.Cube");
-	}
-	else if (Spec.Type == TEXT("sphere") || Spec.Type == TEXT("collectible"))
-	{
-		MeshPath = TEXT("/Engine/BasicShapes/Sphere.Sphere");
-	}
-	else if (Spec.Type == TEXT("cylinder") || Spec.Type == TEXT("pillar"))
-	{
-		MeshPath = TEXT("/Engine/BasicShapes/Cylinder.Cylinder");
-	}
-	else if (Spec.Type == TEXT("cone"))
-	{
-		MeshPath = TEXT("/Engine/BasicShapes/Cone.Cone");
-	}
-	else if (Spec.Type == TEXT("plane"))
-	{
-		MeshPath = TEXT("/Engine/BasicShapes/Plane.Plane");
-	}
-	else if (Spec.Type == TEXT("stairs") || Spec.Type == TEXT("ramp"))
-	{
-		MeshPath = TEXT("/Engine/BasicShapes/Cube.Cube");
-	}
-	else if (Spec.Type == TEXT("arch"))
-	{
-		MeshPath = TEXT("/Engine/BasicShapes/Cylinder.Cylinder");
-	}
-	else
-	{
-		MeshPath = TEXT("/Engine/BasicShapes/Cube.Cube");
+		Mesh = LoadObject<UStaticMesh>(nullptr, *Spec.CustomMesh);
+		if (Mesh)
+		{
+			UE_LOG(LogTemp, Log, TEXT("PromptGameGenerator: Using custom mesh '%s' for actor '%s'."), *Spec.CustomMesh, *Spec.Name);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("PromptGameGenerator: Custom mesh '%s' not found, falling back to basic shape."), *Spec.CustomMesh);
+		}
 	}
 
-	Mesh = LoadObject<UStaticMesh>(nullptr, *MeshPath);
+	// Fallback to basic shapes if no custom mesh loaded
+	if (!Mesh)
+	{
+		if (Spec.Type == TEXT("cube") || Spec.Type == TEXT("wall") || Spec.Type == TEXT("platform") || Spec.Type == TEXT("decoration"))
+		{
+			MeshPath = TEXT("/Engine/BasicShapes/Cube.Cube");
+		}
+		else if (Spec.Type == TEXT("sphere") || Spec.Type == TEXT("collectible"))
+		{
+			MeshPath = TEXT("/Engine/BasicShapes/Sphere.Sphere");
+		}
+		else if (Spec.Type == TEXT("cylinder") || Spec.Type == TEXT("pillar"))
+		{
+			MeshPath = TEXT("/Engine/BasicShapes/Cylinder.Cylinder");
+		}
+		else if (Spec.Type == TEXT("cone"))
+		{
+			MeshPath = TEXT("/Engine/BasicShapes/Cone.Cone");
+		}
+		else if (Spec.Type == TEXT("plane"))
+		{
+			MeshPath = TEXT("/Engine/BasicShapes/Plane.Plane");
+		}
+		else if (Spec.Type == TEXT("stairs") || Spec.Type == TEXT("ramp"))
+		{
+			MeshPath = TEXT("/Engine/BasicShapes/Cube.Cube");
+		}
+		else if (Spec.Type == TEXT("arch"))
+		{
+			MeshPath = TEXT("/Engine/BasicShapes/Cylinder.Cylinder");
+		}
+		else
+		{
+			MeshPath = TEXT("/Engine/BasicShapes/Cube.Cube");
+		}
+
+		Mesh = LoadObject<UStaticMesh>(nullptr, *MeshPath);
+	}
 	if (!Mesh)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("PromptGameGenerator: Failed to load mesh: %s"), *MeshPath);
