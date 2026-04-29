@@ -1,10 +1,13 @@
 import os
+import io
 import uuid
+import wave
+import struct
 import numpy as np
 from scipy.io import wavfile
 from scipy.signal import resample
 from gtts import gTTS
-from pydub import AudioSegment
+import miniaudio
 import asyncio
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "outputs")
@@ -33,6 +36,17 @@ def list_voices() -> list[dict]:
     return VOICES
 
 
+def _mp3_to_wav(mp3_path: str, wav_path: str) -> None:
+    decoded = miniaudio.mp3_read_file_f32(mp3_path)
+    samples = np.frombuffer(decoded.samples, dtype=np.float32)
+    int_samples = (samples * 32767).clip(-32768, 32767).astype(np.int16)
+    with wave.open(wav_path, "wb") as wf:
+        wf.setnchannels(decoded.nchannels)
+        wf.setsampwidth(2)
+        wf.setframerate(decoded.sample_rate)
+        wf.writeframes(int_samples.tobytes())
+
+
 async def text_to_speech(text: str, voice: str = "default", speed: float = 1.0, pitch: float = 1.0) -> str:
     voice_info = VOICE_MAP.get(voice, VOICE_MAP["default"])
     file_id = str(uuid.uuid4())
@@ -42,8 +56,7 @@ async def text_to_speech(text: str, voice: str = "default", speed: float = 1.0, 
     tts = gTTS(text=text, lang=voice_info["language"], tld=voice_info["accent"])
     tts.save(mp3_path)
 
-    audio = AudioSegment.from_mp3(mp3_path)
-    audio.export(wav_path, format="wav")
+    _mp3_to_wav(mp3_path, wav_path)
 
     if speed != 1.0 or pitch != 1.0 or voice in ("robot", "deep", "chipmunk"):
         wav_path = _apply_voice_effects(wav_path, voice, speed, pitch)
@@ -66,13 +79,13 @@ async def modify_voice(
     reverb: float = 0.0,
     echo: float = 0.0,
 ) -> str:
-    try:
-        audio = AudioSegment.from_file(input_path)
+    ext = os.path.splitext(input_path)[1].lower()
+    if ext == ".mp3":
         temp_wav = os.path.join(OUTPUT_DIR, f"{uuid.uuid4()}_temp.wav")
-        audio.export(temp_wav, format="wav")
+        _mp3_to_wav(input_path, temp_wav)
         sample_rate, data = wavfile.read(temp_wav)
         os.remove(temp_wav)
-    except Exception:
+    else:
         sample_rate, data = wavfile.read(input_path)
 
     if len(data.shape) > 1:

@@ -1,9 +1,10 @@
 import os
 import uuid
+import wave
 import numpy as np
 from scipy.io import wavfile
 from scipy.signal import resample, butter, sosfilt
-from pydub import AudioSegment
+import miniaudio
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "outputs")
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads")
@@ -11,15 +12,34 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
+def _read_audio_file(file_path: str):
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == ".mp3":
+        decoded = miniaudio.mp3_read_file_f32(file_path)
+        samples = np.frombuffer(decoded.samples, dtype=np.float32)
+        int_samples = (samples * 32767).clip(-32768, 32767).astype(np.int16)
+        temp_wav = os.path.join(OUTPUT_DIR, f"{uuid.uuid4()}_temp.wav")
+        with wave.open(temp_wav, "wb") as wf:
+            wf.setnchannels(decoded.nchannels)
+            wf.setsampwidth(2)
+            wf.setframerate(decoded.sample_rate)
+            wf.writeframes(int_samples.tobytes())
+        sr, data = wavfile.read(temp_wav)
+        os.remove(temp_wav)
+        return sr, data
+    return wavfile.read(file_path)
+
+
 def get_audio_info(file_path: str) -> dict:
     try:
-        audio = AudioSegment.from_file(file_path)
+        sr, data = _read_audio_file(file_path)
+        channels = 1 if len(data.shape) == 1 else data.shape[1]
         return {
-            "duration": len(audio) / 1000.0,
-            "channels": audio.channels,
-            "sample_rate": audio.frame_rate,
-            "sample_width": audio.sample_width,
-            "frame_count": audio.frame_count(),
+            "duration": len(data) / sr,
+            "channels": channels,
+            "sample_rate": sr,
+            "sample_width": data.dtype.itemsize,
+            "frame_count": len(data),
         }
     except Exception as e:
         return {"error": str(e)}
@@ -30,14 +50,7 @@ async def process_audio(input_path: str, effect: str) -> str:
 
 
 async def apply_effect(file_path: str, effect: str, params: dict) -> str:
-    try:
-        audio = AudioSegment.from_file(file_path)
-        temp_wav = os.path.join(OUTPUT_DIR, f"{uuid.uuid4()}_temp.wav")
-        audio.export(temp_wav, format="wav")
-        sample_rate, data = wavfile.read(temp_wav)
-        os.remove(temp_wav)
-    except Exception:
-        sample_rate, data = wavfile.read(file_path)
+    sample_rate, data = _read_audio_file(file_path)
 
     if len(data.shape) > 1:
         mono = data.mean(axis=1).astype(np.float64)
@@ -174,29 +187,36 @@ async def mix_tracks(track_paths: list[str], volumes: list[float] | None = None)
     if not track_paths:
         raise ValueError("No tracks provided")
 
-    segments = []
-    max_length = 0
+    arrays = []
+    sample_rate = 44100
 
     for path in track_paths:
         try:
-            audio = AudioSegment.from_file(path)
-            segments.append(audio)
-            max_length = max(max_length, len(audio))
+            sr, data = _read_audio_file(path)
+            sample_rate = sr
+            if len(data.shape) > 1:
+                data = data.mean(axis=1)
+            arrays.append(data.astype(np.float64))
         except Exception as e:
             raise ValueError(f"Could not load track {path}: {e}")
 
-    if not volumes or len(volumes) != len(segments):
-        volumes = [1.0] * len(segments)
+    if not volumes or len(volumes) != len(arrays):
+        volumes = [1.0] * len(arrays)
 
-    # Pad all to same length and mix
-    mixed = AudioSegment.silent(duration=max_length)
-    for i, seg in enumerate(segments):
-        vol_db = 20 * np.log10(max(volumes[i], 0.001))
-        adjusted = seg + vol_db
-        mixed = mixed.overlay(adjusted)
+    max_len = max(len(a) for a in arrays)
+    mixed = np.zeros(max_len, dtype=np.float64)
+    for i, arr in enumerate(arrays):
+        padded = np.zeros(max_len)
+        padded[:len(arr)] = arr * volumes[i]
+        mixed += padded
+
+    max_val = np.max(np.abs(mixed))
+    if max_val > 0:
+        mixed = mixed / max_val * 32767
+    mixed = mixed.astype(np.int16)
 
     file_id = str(uuid.uuid4())
     output_path = os.path.join(OUTPUT_DIR, f"{file_id}_mixed.wav")
-    mixed.export(output_path, format="wav")
+    wavfile.write(output_path, sample_rate, mixed)
 
     return output_path
