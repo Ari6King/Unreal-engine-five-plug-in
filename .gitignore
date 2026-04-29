@@ -21,3 +21,20 @@ Thumbs.db
 .vscode/
 .idea/
 *.code-workspace
+
+# Node
+node_modules/
+dist/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+
+# App
+.env
+uploads/
+outputs/
+soundboard/
