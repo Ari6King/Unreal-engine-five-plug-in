@@ -61,7 +61,6 @@ export default function Studio() {
       const track = {
         id: data.file_id,
         name: file.name,
-        path: data.path,
         url: URL.createObjectURL(file),
         info: data.info,
       }
@@ -79,7 +78,7 @@ export default function Studio() {
       const res = await fetch(`${API}/api/studio/effect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_path: selectedTrack.path, effect }),
+        body: JSON.stringify({ file_id: selectedTrack.id, effect }),
       })
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)

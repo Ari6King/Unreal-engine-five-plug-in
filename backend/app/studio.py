@@ -185,7 +185,7 @@ async def mix_tracks(track_paths: list[str], volumes: list[float] | None = None)
         except Exception as e:
             raise ValueError(f"Could not load track {path}: {e}")
 
-    if not volumes:
+    if not volumes or len(volumes) != len(segments):
         volumes = [1.0] * len(segments)
 
     # Pad all to same length and mix

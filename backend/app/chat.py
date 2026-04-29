@@ -283,7 +283,7 @@ While I don't have a specific deep-dive on that exact topic, here's what I sugge
    - Vocal processing chains
 
 3. **Try asking more specifically**, like:
-   - "How do I use {message.split()[0]} in mixing?"
+   - "How do I use {message.split()[0] if message.split() else 'this'} in mixing?"
    - "What's the best approach for {message}?"
 
 Feel free to ask about any of these topics, and I'll give you a detailed breakdown! 🎧"""

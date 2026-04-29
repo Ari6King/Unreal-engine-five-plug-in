@@ -7,6 +7,9 @@ import os
 import uuid
 import json
 
+# Server-side file registry: maps file_id -> absolute path
+_file_registry: dict[str, str] = {}
+
 from app.scraper import scrape_audio_resources, search_audio_topics
 from app.voice import generate_voice, list_voices, modify_voice, text_to_speech
 from app.chat import chat_response
@@ -71,7 +74,7 @@ class TTSRequest(BaseModel):
 @app.post("/api/voice/tts")
 async def tts(req: TTSRequest):
     file_path = await text_to_speech(req.text, req.voice, req.speed, req.pitch)
-    return FileResponse(file_path, media_type="audio/mp3", filename="voice.mp3")
+    return FileResponse(file_path, media_type="audio/wav", filename="voice.wav")
 
 
 @app.get("/api/voice/list")
@@ -161,29 +164,49 @@ async def studio_upload(file: UploadFile = File(...)):
         content = await file.read()
         f.write(content)
     info = get_audio_info(path)
-    return {"file_id": file_id, "path": path, "info": info}
+    _file_registry[file_id] = path
+    return {"file_id": file_id, "info": info}
 
 
 class EffectRequest(BaseModel):
-    file_path: str
+    file_id: str
     effect: str
     params: dict = {}
 
 
+def _resolve_file_id(file_id: str) -> str:
+    """Look up a file_id in the registry, falling back to scanning allowed dirs."""
+    if file_id in _file_registry:
+        return _file_registry[file_id]
+    # Fallback: check if file exists in UPLOAD_DIR or OUTPUT_DIR
+    for directory in (UPLOAD_DIR, OUTPUT_DIR):
+        for fname in os.listdir(directory):
+            if fname.startswith(file_id):
+                full = os.path.join(directory, fname)
+                _file_registry[file_id] = full
+                return full
+    raise HTTPException(status_code=404, detail=f"File not found: {file_id}")
+
+
 @app.post("/api/studio/effect")
 async def studio_effect(req: EffectRequest):
-    output_path = await apply_effect(req.file_path, req.effect, req.params)
+    file_path = _resolve_file_id(req.file_id)
+    output_path = await apply_effect(file_path, req.effect, req.params)
+    # Register the output so it can be used in subsequent operations
+    out_id = os.path.splitext(os.path.basename(output_path))[0]
+    _file_registry[out_id] = output_path
     return FileResponse(output_path, media_type="audio/wav", filename="processed.wav")
 
 
 class MixRequest(BaseModel):
-    tracks: list[str]
+    track_ids: list[str]
     volumes: list[float] = []
 
 
 @app.post("/api/studio/mix")
 async def studio_mix(req: MixRequest):
-    output_path = await mix_tracks(req.tracks, req.volumes)
+    track_paths = [_resolve_file_id(fid) for fid in req.track_ids]
+    output_path = await mix_tracks(track_paths, req.volumes)
     return FileResponse(output_path, media_type="audio/wav", filename="mixed.wav")
 
 

@@ -66,7 +66,14 @@ async def modify_voice(
     reverb: float = 0.0,
     echo: float = 0.0,
 ) -> str:
-    sample_rate, data = wavfile.read(input_path)
+    try:
+        audio = AudioSegment.from_file(input_path)
+        temp_wav = os.path.join(OUTPUT_DIR, f"{uuid.uuid4()}_temp.wav")
+        audio.export(temp_wav, format="wav")
+        sample_rate, data = wavfile.read(temp_wav)
+        os.remove(temp_wav)
+    except Exception:
+        sample_rate, data = wavfile.read(input_path)
 
     if len(data.shape) > 1:
         data = data.mean(axis=1)
