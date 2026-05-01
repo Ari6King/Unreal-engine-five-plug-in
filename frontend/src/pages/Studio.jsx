@@ -36,20 +36,6 @@ export default function Studio() {
   const mediaRecorderRef = useRef(null)
   const chunksRef = useRef([])
 
-  // TTS for music
-  const [musicText, setMusicText] = useState('')
-  const [musicVoice, setMusicVoice] = useState('default')
-  const [voices, setVoices] = useState([])
-  const [musicLoading, setMusicLoading] = useState(false)
-  const [musicUrl, setMusicUrl] = useState(null)
-
-  useEffect(() => {
-    fetch(`${API}/api/voice/list`)
-      .then((r) => r.json())
-      .then((d) => setVoices(d.voices || []))
-      .catch(() => {})
-  }, [])
-
   const uploadTrack = async (e) => {
     const file = e.target.files[0]
     if (!file) return
@@ -121,22 +107,7 @@ export default function Studio() {
     }
   }
 
-  const generateMusicVoice = async () => {
-    if (!musicText.trim()) return
-    setMusicLoading(true)
-    try {
-      const res = await fetch(`${API}/api/voice/tts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: musicText, voice: musicVoice, speed: 1.0, pitch: 1.0 }),
-      })
-      const blob = await res.blob()
-      setMusicUrl(URL.createObjectURL(blob))
-    } catch (err) {
-      console.error(err)
-    }
-    setMusicLoading(false)
-  }
+
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -145,7 +116,7 @@ export default function Studio() {
           🎧 Studio
         </h2>
         <p style={{ color: 'var(--text-secondary)' }}>
-          Record, edit, apply effects, create AI-voiced music, and mix your tracks
+          Record, edit, apply effects, and mix your tracks
         </p>
       </div>
 
@@ -232,49 +203,7 @@ export default function Studio() {
             )}
           </div>
 
-          {/* AI Voice for Music */}
-          <div className="card">
-            <h3 className="text-lg font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
-              AI Voice for Music
-            </h3>
-            <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
-              Generate AI vocals for your music productions
-            </p>
-            <textarea
-              className="input-field mb-3 h-20 resize-none"
-              placeholder="Enter lyrics or text for the AI voice..."
-              value={musicText}
-              onChange={(e) => setMusicText(e.target.value)}
-            />
-            <select
-              className="input-field mb-3"
-              value={musicVoice}
-              onChange={(e) => setMusicVoice(e.target.value)}
-            >
-              {voices.map((v) => (
-                <option key={v.id} value={v.id}>{v.name}</option>
-              ))}
-            </select>
-            <button
-              onClick={generateMusicVoice}
-              className="btn-primary w-full"
-              disabled={musicLoading || !musicText.trim()}
-            >
-              {musicLoading ? 'Generating...' : 'Generate AI Vocal'}
-            </button>
-            {musicUrl && (
-              <div className="mt-3">
-                <AudioPlayer src={musicUrl} title="AI Vocal" />
-                <a
-                  href={musicUrl}
-                  download="ai_vocal.wav"
-                  className="btn-secondary w-full text-center block mt-2 text-sm"
-                >
-                  Download Vocal
-                </a>
-              </div>
-            )}
-          </div>
+
         </div>
 
         {/* Center: Player & Waveform */}

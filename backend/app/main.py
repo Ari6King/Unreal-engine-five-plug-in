@@ -121,7 +121,9 @@ async def play_sound(sound_id: str):
         raise HTTPException(status_code=400, detail="Invalid sound id")
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Sound not found")
-    media_type = "audio/mp3" if sound_id.endswith(".mp3") else "audio/wav"
+    ext = os.path.splitext(safe_id)[1].lower()
+    media_types = {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".wav": "audio/wav"}
+    media_type = media_types.get(ext, "audio/wav")
     return FileResponse(path, media_type=media_type)
 
 
