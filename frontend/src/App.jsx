@@ -11,7 +11,7 @@ import './App.css'
 const PAGES = {
   dashboard: { label: 'Dashboard', icon: '🏠' },
   scraper: { label: 'Web Scraper', icon: '🔍' },
-  voice: { label: 'Voice Generator', icon: '🎤' },
+  voice: { label: 'Voice Synthesizer', icon: '🎤' },
   soundboard: { label: 'Soundboard', icon: '🎹' },
   chat: { label: 'AI Chat', icon: '🤖' },
   studio: { label: 'Studio', icon: '🎧' },

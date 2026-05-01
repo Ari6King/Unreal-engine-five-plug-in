@@ -10,8 +10,8 @@ export default function Dashboard({ onNavigate }) {
     {
       key: 'voice',
       icon: '🎤',
-      title: 'Voice Generator',
-      desc: 'Create and modify voices with pitch, speed, reverb, and echo controls',
+      title: 'Voice Synthesizer',
+      desc: 'Upload sounds and manufacture new voices by editing frequency, formants, treble, bass, and more',
       color: '#22c55e',
     },
     {
@@ -105,7 +105,7 @@ export default function Dashboard({ onNavigate }) {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-12">
         {[
-          { label: 'Voice Types', value: '13+' },
+          { label: 'Voice Presets', value: '9' },
           { label: 'Audio Effects', value: '15+' },
           { label: 'Topics', value: '25+' },
           { label: 'AI Powered', value: 'Yes' },

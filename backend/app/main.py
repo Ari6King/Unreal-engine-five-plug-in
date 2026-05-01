@@ -11,7 +11,7 @@ import json
 _file_registry: dict[str, str] = {}
 
 from app.scraper import scrape_audio_resources, search_audio_topics
-from app.voice import generate_voice, list_voices, modify_voice, text_to_speech
+from app.voice import synthesize_voice, list_presets
 from app.chat import chat_response
 from app.studio import (
     process_audio,
@@ -63,34 +63,14 @@ async def topics():
     return {"topics": search_audio_topics()}
 
 
-# --- Voice Generator ---
-class TTSRequest(BaseModel):
-    text: str
-    voice: str = "default"
-    speed: float = 1.0
-    pitch: float = 1.0
+# --- Voice Synthesizer ---
+@app.get("/api/voice/presets")
+async def get_presets():
+    return {"presets": list_presets()}
 
 
-@app.post("/api/voice/tts")
-async def tts(req: TTSRequest):
-    file_path = await text_to_speech(req.text, req.voice, req.speed, req.pitch)
-    return FileResponse(file_path, media_type="audio/wav", filename="voice.wav")
-
-
-@app.get("/api/voice/list")
-async def get_voices():
-    return {"voices": list_voices()}
-
-
-class VoiceModifyRequest(BaseModel):
-    pitch_shift: float = 0.0
-    speed: float = 1.0
-    reverb: float = 0.0
-    echo: float = 0.0
-
-
-@app.post("/api/voice/modify")
-async def modify(file: UploadFile = File(...), settings: str = Form("{}")):
+@app.post("/api/voice/synthesize")
+async def synthesize(file: UploadFile = File(...), settings: str = Form("{}")):
     file_id = str(uuid.uuid4())
     safe_name = os.path.basename(file.filename or "audio.wav")
     input_path = os.path.join(UPLOAD_DIR, f"{file_id}_{safe_name}")
@@ -98,9 +78,8 @@ async def modify(file: UploadFile = File(...), settings: str = Form("{}")):
         content = await file.read()
         f.write(content)
     params = json.loads(settings)
-    req = VoiceModifyRequest(**params)
-    output_path = await modify_voice(input_path, req.pitch_shift, req.speed, req.reverb, req.echo)
-    return FileResponse(output_path, media_type="audio/wav", filename="modified_voice.wav")
+    output_path = await synthesize_voice(input_path, params)
+    return FileResponse(output_path, media_type="audio/wav", filename="synthesized_voice.wav")
 
 
 # --- AI Chat ---

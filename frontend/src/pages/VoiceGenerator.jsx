@@ -1,292 +1,271 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import AudioPlayer from '../components/AudioPlayer'
 import WaveformVisualizer from '../components/WaveformVisualizer'
 
 const API = import.meta.env.VITE_API_URL || ''
 
-export default function VoiceGenerator() {
-  const [text, setText] = useState('')
-  const [voice, setVoice] = useState('default')
-  const [speed, setSpeed] = useState(1.0)
-  const [pitch, setPitch] = useState(1.0)
-  const [voices, setVoices] = useState([])
-  const [audioUrl, setAudioUrl] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [playing, setPlaying] = useState(false)
+const PARAM_DEFS = [
+  { key: 'pitch_shift', label: 'Pitch Shift', unit: 'semi', min: -12, max: 12, step: 1, default: 0 },
+  { key: 'formant_shift', label: 'Formant Shift', unit: 'semi', min: -12, max: 12, step: 1, default: 0 },
+  { key: 'bass', label: 'Bass (Low EQ)', unit: 'dB', min: -12, max: 12, step: 1, default: 0 },
+  { key: 'mid', label: 'Mid EQ', unit: 'dB', min: -12, max: 12, step: 1, default: 0 },
+  { key: 'treble', label: 'Treble (High EQ)', unit: 'dB', min: -12, max: 12, step: 1, default: 0 },
+  { key: 'presence', label: 'Presence', unit: 'dB', min: -12, max: 12, step: 1, default: 0 },
+  { key: 'harmonics', label: 'Harmonics', unit: '', min: 0, max: 1, step: 0.05, default: 0 },
+  { key: 'breathiness', label: 'Breathiness', unit: '', min: 0, max: 1, step: 0.05, default: 0 },
+  { key: 'vibrato_rate', label: 'Vibrato Rate', unit: 'Hz', min: 0, max: 12, step: 0.5, default: 0 },
+  { key: 'vibrato_depth', label: 'Vibrato Depth', unit: '', min: 0, max: 1, step: 0.05, default: 0 },
+  { key: 'compression', label: 'Compression', unit: '', min: 0, max: 1, step: 0.05, default: 0 },
+  { key: 'distortion', label: 'Distortion', unit: '', min: 0, max: 1, step: 0.05, default: 0 },
+]
 
-  // Voice modification
-  const [modFile, setModFile] = useState(null)
-  const [pitchShift, setPitchShift] = useState(0)
-  const [modSpeed, setModSpeed] = useState(1.0)
-  const [reverb, setReverb] = useState(0)
-  const [echo, setEcho] = useState(0)
-  const [modAudioUrl, setModAudioUrl] = useState(null)
-  const [modLoading, setModLoading] = useState(false)
+function defaultParams() {
+  const p = {}
+  PARAM_DEFS.forEach((d) => { p[d.key] = d.default })
+  return p
+}
+
+export default function VoiceGenerator() {
+  const [file, setFile] = useState(null)
+  const [presets, setPresets] = useState([])
+  const [selectedPreset, setSelectedPreset] = useState('custom')
+  const [params, setParams] = useState(defaultParams())
+  const [audioUrl, setAudioUrl] = useState(null)
+  const [sourceUrl, setSourceUrl] = useState(null)
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    fetch(`${API}/api/voice/list`)
+    fetch(`${API}/api/voice/presets`)
       .then((r) => r.json())
-      .then((d) => setVoices(d.voices || []))
+      .then((d) => setPresets(d.presets || []))
       .catch(() => {})
   }, [])
 
-  const generate = async () => {
-    if (!text.trim()) return
+  const handleFileChange = (e) => {
+    const f = e.target.files[0]
+    if (f) {
+      setFile(f)
+      setSourceUrl(URL.createObjectURL(f))
+      setAudioUrl(null)
+    }
+  }
+
+  const selectPreset = (presetId) => {
+    setSelectedPreset(presetId)
+    const preset = presets.find((p) => p.id === presetId)
+    if (preset) {
+      const base = defaultParams()
+      setParams({ ...base, ...(preset.params || {}) })
+    }
+  }
+
+  const updateParam = (key, value) => {
+    setParams((prev) => ({ ...prev, [key]: Number(value) }))
+    setSelectedPreset('custom')
+  }
+
+  const resetParams = () => {
+    setParams(defaultParams())
+    setSelectedPreset('custom')
+  }
+
+  const synthesize = async () => {
+    if (!file) return
     setLoading(true)
     try {
-      const res = await fetch(`${API}/api/voice/tts`, {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('settings', JSON.stringify({
+        preset: selectedPreset,
+        ...params,
+      }))
+      const res = await fetch(`${API}/api/voice/synthesize`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice, speed, pitch }),
+        body: formData,
       })
+      if (!res.ok) throw new Error('Synthesis failed')
       const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      setAudioUrl(url)
+      setAudioUrl(URL.createObjectURL(blob))
     } catch (err) {
       console.error(err)
     }
     setLoading(false)
   }
 
-  const modifyVoice = async () => {
-    if (!modFile) return
-    setModLoading(true)
-    try {
-      const formData = new FormData()
-      formData.append('file', modFile)
-      formData.append('settings', JSON.stringify({
-        pitch_shift: pitchShift,
-        speed: modSpeed,
-        reverb,
-        echo,
-      }))
-      const res = await fetch(`${API}/api/voice/modify`, {
-        method: 'POST',
-        body: formData,
-      })
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      setModAudioUrl(url)
-    } catch (err) {
-      console.error(err)
-    }
-    setModLoading(false)
-  }
-
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="max-w-6xl mx-auto">
       <div className="mb-8">
         <h2 className="text-3xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
-          🎤 Voice Generator
+          Voice Synthesizer
         </h2>
         <p style={{ color: 'var(--text-secondary)' }}>
-          Create and modify voices with multiple languages, accents, and effects
+          Upload any sound and manufacture new voices by editing frequency, formants, treble, bass, and more
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Text to Speech */}
+      {/* Upload + Presets Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+        {/* File Upload */}
         <div className="card">
           <h3 className="text-lg font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
-            Text to Speech
+            Source Sound
           </h3>
-          <textarea
-            className="input-field mb-4 h-32 resize-none"
-            placeholder="Enter text to convert to speech..."
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-          />
-
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium block mb-2" style={{ color: 'var(--text-secondary)' }}>
-                Voice
-              </label>
-              <select
-                className="input-field"
-                value={voice}
-                onChange={(e) => setVoice(e.target.value)}
-              >
-                {voices.map((v) => (
-                  <option key={v.id} value={v.id}>{v.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="text-sm font-medium block mb-2" style={{ color: 'var(--text-secondary)' }}>
-                Speed: {speed.toFixed(1)}x
-              </label>
-              <input
-                type="range"
-                min="0.5"
-                max="2"
-                step="0.1"
-                value={speed}
-                onChange={(e) => setSpeed(Number(e.target.value))}
-                className="slider w-full"
-              />
-            </div>
-
-            <div>
-              <label className="text-sm font-medium block mb-2" style={{ color: 'var(--text-secondary)' }}>
-                Pitch: {pitch.toFixed(1)}x
-              </label>
-              <input
-                type="range"
-                min="0.5"
-                max="2"
-                step="0.1"
-                value={pitch}
-                onChange={(e) => setPitch(Number(e.target.value))}
-                className="slider w-full"
-              />
-            </div>
-
-            <button onClick={generate} className="btn-primary w-full" disabled={loading}>
-              {loading ? 'Generating...' : 'Generate Voice'}
-            </button>
-          </div>
-
-          {audioUrl && (
-            <div className="mt-4">
-              <WaveformVisualizer audioUrl={audioUrl} playing={playing} />
-              <div className="mt-3">
-                <AudioPlayer
-                  src={audioUrl}
-                  title="Generated Voice"
-                  onEnded={() => setPlaying(false)}
-                />
-              </div>
-              <a
-                href={audioUrl}
-                download="voice.wav"
-                className="btn-secondary w-full text-center block mt-3"
-              >
-                Download Audio
-              </a>
-            </div>
-          )}
-        </div>
-
-        {/* Voice Modifier */}
-        <div className="card">
-          <h3 className="text-lg font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
-            Voice Modifier
-          </h3>
-          <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
-            Upload an audio file and modify its voice characteristics
-          </p>
-
           <div
-            className="border-2 border-dashed rounded-xl p-8 text-center mb-4 cursor-pointer transition-all hover:border-[var(--accent)]"
+            className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all hover:border-[var(--accent)]"
             style={{ borderColor: 'var(--border)' }}
-            onClick={() => document.getElementById('mod-file-input').click()}
+            onClick={() => document.getElementById('voice-file-input').click()}
           >
             <input
-              id="mod-file-input"
+              id="voice-file-input"
               type="file"
               accept="audio/*"
               className="hidden"
-              onChange={(e) => setModFile(e.target.files[0])}
+              onChange={handleFileChange}
             />
-            {modFile ? (
+            {file ? (
               <div>
                 <p className="text-2xl mb-2">🎵</p>
-                <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{modFile.name}</p>
-                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                  {(modFile.size / 1024 / 1024).toFixed(2)} MB
+                <p className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>
+                  {file.name}
+                </p>
+                <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                  {(file.size / 1024 / 1024).toFixed(2)} MB
                 </p>
               </div>
             ) : (
               <div>
-                <p className="text-4xl mb-2">📁</p>
-                <p style={{ color: 'var(--text-muted)' }}>Click to upload audio file</p>
-                <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>WAV, MP3, OGG</p>
+                <p className="text-4xl mb-2">🎙️</p>
+                <p className="font-medium" style={{ color: 'var(--text-muted)' }}>
+                  Upload a sound to transform
+                </p>
+                <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                  WAV, MP3, OGG — voice, instrument, noise, anything
+                </p>
               </div>
             )}
           </div>
 
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium block mb-2" style={{ color: 'var(--text-secondary)' }}>
-                Pitch Shift: {pitchShift > 0 ? '+' : ''}{pitchShift} semitones
-              </label>
-              <input
-                type="range"
-                min="-12"
-                max="12"
-                step="1"
-                value={pitchShift}
-                onChange={(e) => setPitchShift(Number(e.target.value))}
-                className="slider w-full"
-              />
-            </div>
-
-            <div>
-              <label className="text-sm font-medium block mb-2" style={{ color: 'var(--text-secondary)' }}>
-                Speed: {modSpeed.toFixed(1)}x
-              </label>
-              <input
-                type="range"
-                min="0.5"
-                max="2"
-                step="0.1"
-                value={modSpeed}
-                onChange={(e) => setModSpeed(Number(e.target.value))}
-                className="slider w-full"
-              />
-            </div>
-
-            <div>
-              <label className="text-sm font-medium block mb-2" style={{ color: 'var(--text-secondary)' }}>
-                Reverb: {reverb.toFixed(1)}
-              </label>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.1"
-                value={reverb}
-                onChange={(e) => setReverb(Number(e.target.value))}
-                className="slider w-full"
-              />
-            </div>
-
-            <div>
-              <label className="text-sm font-medium block mb-2" style={{ color: 'var(--text-secondary)' }}>
-                Echo: {echo.toFixed(1)}
-              </label>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.1"
-                value={echo}
-                onChange={(e) => setEcho(Number(e.target.value))}
-                className="slider w-full"
-              />
-            </div>
-
-            <button onClick={modifyVoice} className="btn-primary w-full" disabled={modLoading || !modFile}>
-              {modLoading ? 'Processing...' : 'Modify Voice'}
-            </button>
-          </div>
-
-          {modAudioUrl && (
+          {sourceUrl && (
             <div className="mt-4">
-              <AudioPlayer src={modAudioUrl} title="Modified Voice" />
-              <a
-                href={modAudioUrl}
-                download="modified_voice.wav"
-                className="btn-secondary w-full text-center block mt-3"
-              >
-                Download Modified Audio
-              </a>
+              <p className="text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
+                Original
+              </p>
+              <AudioPlayer src={sourceUrl} title="Source Sound" />
             </div>
           )}
         </div>
+
+        {/* Presets */}
+        <div className="card lg:col-span-2">
+          <h3 className="text-lg font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
+            Voice Presets
+          </h3>
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+            {presets.map((preset) => (
+              <button
+                key={preset.id}
+                onClick={() => selectPreset(preset.id)}
+                className={`p-3 rounded-lg text-left transition-all text-sm ${
+                  selectedPreset === preset.id
+                    ? 'ring-2 ring-[var(--accent)]'
+                    : 'hover:bg-[var(--surface-hover)]'
+                }`}
+                style={{
+                  background: selectedPreset === preset.id
+                    ? 'var(--accent-alpha)'
+                    : 'var(--surface)',
+                  color: 'var(--text-primary)',
+                }}
+              >
+                <p className="font-medium">{preset.name}</p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                  {preset.description}
+                </p>
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
+
+      {/* DSP Controls */}
+      <div className="card mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+            Voice Parameters
+          </h3>
+          <button
+            onClick={resetParams}
+            className="text-sm px-3 py-1 rounded-lg hover:bg-[var(--surface-hover)] transition-all"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            Reset All
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
+          {PARAM_DEFS.map((def) => {
+            const val = params[def.key]
+            const isModified = val !== def.default
+            return (
+              <div key={def.key}>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm font-medium" style={{
+                    color: isModified ? 'var(--accent)' : 'var(--text-secondary)'
+                  }}>
+                    {def.label}
+                  </label>
+                  <span className="text-xs font-mono" style={{
+                    color: isModified ? 'var(--accent)' : 'var(--text-muted)'
+                  }}>
+                    {val > 0 && def.min < 0 ? '+' : ''}{Number(val).toFixed(def.step < 1 ? 2 : 0)}
+                    {def.unit ? ` ${def.unit}` : ''}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={def.min}
+                  max={def.max}
+                  step={def.step}
+                  value={val}
+                  onChange={(e) => updateParam(def.key, e.target.value)}
+                  className="slider w-full"
+                />
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Synthesize Button */}
+      <div className="mb-6">
+        <button
+          onClick={synthesize}
+          className="btn-primary w-full py-4 text-lg font-semibold"
+          disabled={loading || !file}
+        >
+          {loading ? 'Synthesizing Voice...' : 'Synthesize Voice'}
+        </button>
+      </div>
+
+      {/* Output */}
+      {audioUrl && (
+        <div className="card">
+          <h3 className="text-lg font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
+            Synthesized Voice
+          </h3>
+          <WaveformVisualizer audioUrl={audioUrl} />
+          <div className="mt-3">
+            <AudioPlayer src={audioUrl} title="Synthesized Output" />
+          </div>
+          <a
+            href={audioUrl}
+            download="synthesized_voice.wav"
+            className="btn-secondary w-full text-center block mt-3"
+          >
+            Download Synthesized Voice
+          </a>
+        </div>
+      )}
     </div>
   )
 }

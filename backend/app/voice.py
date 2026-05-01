@@ -1,184 +1,355 @@
 import os
-import io
 import uuid
 import wave
-import struct
 import numpy as np
 from scipy.io import wavfile
-from scipy.signal import resample
-from gtts import gTTS
+from scipy.signal import resample, butter, sosfilt, lfilter
 import miniaudio
-import asyncio
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "outputs")
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-VOICES = [
-    {"id": "default", "name": "Default", "language": "en", "accent": "com"},
-    {"id": "british", "name": "British English", "language": "en", "accent": "co.uk"},
-    {"id": "australian", "name": "Australian English", "language": "en", "accent": "com.au"},
-    {"id": "indian", "name": "Indian English", "language": "en", "accent": "co.in"},
-    {"id": "french", "name": "French", "language": "fr", "accent": "fr"},
-    {"id": "spanish", "name": "Spanish", "language": "es", "accent": "es"},
-    {"id": "german", "name": "German", "language": "de", "accent": "de"},
-    {"id": "japanese", "name": "Japanese", "language": "ja", "accent": "co.jp"},
-    {"id": "korean", "name": "Korean", "language": "ko", "accent": "co.kr"},
-    {"id": "portuguese", "name": "Portuguese", "language": "pt", "accent": "com.br"},
-    {"id": "robot", "name": "Robot", "language": "en", "accent": "com"},
-    {"id": "deep", "name": "Deep Voice", "language": "en", "accent": "com"},
-    {"id": "chipmunk", "name": "Chipmunk", "language": "en", "accent": "com"},
+# ---------------------------------------------------------------------------
+# Voice presets — each preset defines DSP parameter overrides
+# ---------------------------------------------------------------------------
+VOICE_PRESETS = [
+    {
+        "id": "custom",
+        "name": "Custom",
+        "description": "Manual parameter control",
+        "params": {},
+    },
+    {
+        "id": "male_deep",
+        "name": "Male Deep",
+        "description": "Deep masculine voice with rich bass",
+        "params": {
+            "pitch_shift": -5,
+            "formant_shift": -4,
+            "bass": 6,
+            "mid": 0,
+            "treble": -2,
+            "breathiness": 0.05,
+        },
+    },
+    {
+        "id": "female_high",
+        "name": "Female High",
+        "description": "Bright feminine voice with clarity",
+        "params": {
+            "pitch_shift": 5,
+            "formant_shift": 4,
+            "bass": -3,
+            "mid": 2,
+            "treble": 4,
+            "presence": 3,
+            "breathiness": 0.1,
+        },
+    },
+    {
+        "id": "child",
+        "name": "Child",
+        "description": "High-pitched youthful voice",
+        "params": {
+            "pitch_shift": 8,
+            "formant_shift": 6,
+            "bass": -6,
+            "treble": 5,
+            "presence": 4,
+        },
+    },
+    {
+        "id": "robot",
+        "name": "Robot",
+        "description": "Metallic synthetic voice",
+        "params": {
+            "harmonics": 0.7,
+            "formant_shift": 0,
+            "treble": 3,
+            "compression": 0.9,
+            "vibrato_rate": 0,
+            "breathiness": 0,
+        },
+    },
+    {
+        "id": "whisper",
+        "name": "Whisper",
+        "description": "Soft breathy whispered voice",
+        "params": {
+            "breathiness": 0.6,
+            "bass": -4,
+            "treble": 2,
+            "compression": 0.3,
+            "harmonics": 0,
+        },
+    },
+    {
+        "id": "monster",
+        "name": "Monster",
+        "description": "Deep growling distorted voice",
+        "params": {
+            "pitch_shift": -10,
+            "formant_shift": -8,
+            "bass": 8,
+            "treble": -4,
+            "distortion": 0.6,
+            "harmonics": 0.5,
+        },
+    },
+    {
+        "id": "alien",
+        "name": "Alien",
+        "description": "Eerie warped otherworldly voice",
+        "params": {
+            "formant_shift": 7,
+            "vibrato_rate": 8,
+            "vibrato_depth": 0.4,
+            "harmonics": 0.4,
+            "treble": 6,
+            "presence": 5,
+        },
+    },
+    {
+        "id": "radio",
+        "name": "Radio / Telephone",
+        "description": "Narrow bandpass like old radio or phone",
+        "params": {
+            "bass": -12,
+            "treble": -8,
+            "mid": 6,
+            "presence": 4,
+            "compression": 0.7,
+            "distortion": 0.15,
+        },
+    },
 ]
 
-VOICE_MAP = {v["id"]: v for v in VOICES}
+
+def list_presets() -> list[dict]:
+    return VOICE_PRESETS
 
 
-def list_voices() -> list[dict]:
-    return VOICES
+# ---------------------------------------------------------------------------
+# Audio I/O helpers
+# ---------------------------------------------------------------------------
 
-
-def _mp3_to_wav(mp3_path: str, wav_path: str) -> None:
-    decoded = miniaudio.mp3_read_file_f32(mp3_path)
-    samples = np.frombuffer(decoded.samples, dtype=np.float32)
-    int_samples = (samples * 32767).clip(-32768, 32767).astype(np.int16)
-    with wave.open(wav_path, "wb") as wf:
-        wf.setnchannels(decoded.nchannels)
-        wf.setsampwidth(2)
-        wf.setframerate(decoded.sample_rate)
-        wf.writeframes(int_samples.tobytes())
-
-
-async def text_to_speech(text: str, voice: str = "default", speed: float = 1.0, pitch: float = 1.0) -> str:
-    voice_info = VOICE_MAP.get(voice, VOICE_MAP["default"])
-    file_id = str(uuid.uuid4())
-    mp3_path = os.path.join(OUTPUT_DIR, f"{file_id}.mp3")
-    wav_path = os.path.join(OUTPUT_DIR, f"{file_id}.wav")
-
-    tts = gTTS(text=text, lang=voice_info["language"], tld=voice_info["accent"])
-    tts.save(mp3_path)
-
-    _mp3_to_wav(mp3_path, wav_path)
-
-    if speed != 1.0 or pitch != 1.0 or voice in ("robot", "deep", "chipmunk"):
-        wav_path = _apply_voice_effects(wav_path, voice, speed, pitch)
-
-    os.remove(mp3_path)
-    return wav_path
-
-
-async def generate_voice(text: str, settings: dict) -> str:
-    voice = settings.get("voice", "default")
-    speed = settings.get("speed", 1.0)
-    pitch = settings.get("pitch", 1.0)
-    return await text_to_speech(text, voice, speed, pitch)
-
-
-async def modify_voice(
-    input_path: str,
-    pitch_shift: float = 0.0,
-    speed: float = 1.0,
-    reverb: float = 0.0,
-    echo: float = 0.0,
-) -> str:
-    ext = os.path.splitext(input_path)[1].lower()
+def _read_audio(file_path: str):
+    ext = os.path.splitext(file_path)[1].lower()
     if ext == ".mp3":
+        decoded = miniaudio.mp3_read_file_f32(file_path)
+        samples = np.frombuffer(decoded.samples, dtype=np.float32)
+        int_samples = (samples * 32767).clip(-32768, 32767).astype(np.int16)
         temp_wav = os.path.join(OUTPUT_DIR, f"{uuid.uuid4()}_temp.wav")
-        _mp3_to_wav(input_path, temp_wav)
-        sample_rate, data = wavfile.read(temp_wav)
+        with wave.open(temp_wav, "wb") as wf:
+            wf.setnchannels(decoded.nchannels)
+            wf.setsampwidth(2)
+            wf.setframerate(decoded.sample_rate)
+            wf.writeframes(int_samples.tobytes())
+        sr, data = wavfile.read(temp_wav)
         os.remove(temp_wav)
-    else:
-        sample_rate, data = wavfile.read(input_path)
+        return sr, data
+    return wavfile.read(file_path)
 
+
+def _to_mono_float(data: np.ndarray) -> np.ndarray:
     if len(data.shape) > 1:
         data = data.mean(axis=1)
+    return data.astype(np.float64)
 
-    data = data.astype(np.float64)
 
-    # Pitch shift via resampling
-    if pitch_shift != 0.0:
-        factor = 2.0 ** (pitch_shift / 12.0)
-        new_length = int(len(data) / factor)
-        data = resample(data, new_length)
-
-    # Speed change
-    if speed != 1.0 and speed > 0:
-        new_length = int(len(data) / speed)
-        data = resample(data, new_length)
-
-    # Simple reverb (convolution with decay)
-    if reverb > 0:
-        decay_samples = int(sample_rate * reverb * 0.5)
-        if decay_samples > 0:
-            impulse = np.exp(-np.linspace(0, 5, decay_samples))
-            reverb_signal = np.convolve(data, impulse)[:len(data)]
-            data = data * 0.7 + reverb_signal * 0.3
-
-    # Echo
-    if echo > 0:
-        delay_samples = int(sample_rate * echo * 0.3)
-        if delay_samples > 0 and delay_samples < len(data):
-            echo_signal = np.zeros_like(data)
-            echo_signal[delay_samples:] = data[:-delay_samples] * 0.5
-            data = data + echo_signal
-
-    # Normalize
-    max_val = np.max(np.abs(data))
+def _save_wav(samples: np.ndarray, sample_rate: int, tag: str = "synth") -> str:
+    max_val = np.max(np.abs(samples))
     if max_val > 0:
-        data = data / max_val * 32767
-
-    data = data.astype(np.int16)
-
+        samples = samples / max_val * 32767
+    samples = samples.astype(np.int16)
     file_id = str(uuid.uuid4())
-    output_path = os.path.join(OUTPUT_DIR, f"{file_id}_modified.wav")
-    wavfile.write(output_path, sample_rate, data)
+    path = os.path.join(OUTPUT_DIR, f"{file_id}_{tag}.wav")
+    wavfile.write(path, sample_rate, samples)
+    return path
 
-    return output_path
+
+# ---------------------------------------------------------------------------
+# DSP building blocks
+# ---------------------------------------------------------------------------
+
+def _pitch_shift(data: np.ndarray, semitones: float) -> np.ndarray:
+    if semitones == 0:
+        return data
+    factor = 2.0 ** (semitones / 12.0)
+    new_len = int(len(data) / factor)
+    if new_len < 1:
+        return data
+    return resample(data, new_len)
 
 
-def _apply_voice_effects(wav_path: str, voice: str, speed: float, pitch: float) -> str:
-    sample_rate, data = wavfile.read(wav_path)
+def _formant_shift(data: np.ndarray, sr: int, semitones: float) -> np.ndarray:
+    """Shift formants by resampling then pitch-correcting back."""
+    if semitones == 0:
+        return data
+    factor = 2.0 ** (semitones / 12.0)
+    # Resample to shift spectrum (formants move)
+    stretched_len = int(len(data) * factor)
+    if stretched_len < 1:
+        return data
+    stretched = resample(data, stretched_len)
+    # Resample back to original length to keep pitch the same
+    return resample(stretched, len(data))
 
-    if len(data.shape) > 1:
-        data = data.mean(axis=1)
 
-    data = data.astype(np.float64)
+def _eq_band(data: np.ndarray, sr: int, freq_low: float, freq_high: float,
+             gain_db: float) -> np.ndarray:
+    if gain_db == 0:
+        return data
+    nyq = sr / 2.0
+    low = max(freq_low / nyq, 0.001)
+    high = min(freq_high / nyq, 0.999)
+    if low >= high:
+        return data
+    try:
+        sos = butter(2, [low, high], btype="band", output="sos")
+        band = sosfilt(sos, data)
+    except ValueError:
+        return data
+    linear_gain = 10.0 ** (gain_db / 20.0) - 1.0
+    return data + band * linear_gain
 
-    if voice == "robot":
-        # Robot effect: add harmonics + quantize
-        t = np.arange(len(data)) / sample_rate
-        modulator = np.sin(2 * np.pi * 30 * t) * 0.3
-        data = data * (1 + modulator)
-        # Bit crush effect
-        levels = 32
-        data = np.round(data / (32768 / levels)) * (32768 / levels)
-        pitch = 0.9
 
-    elif voice == "deep":
-        pitch = 0.7
+def _apply_eq(data: np.ndarray, sr: int, bass: float, mid: float,
+              treble: float, presence: float) -> np.ndarray:
+    data = _eq_band(data, sr, 20, 250, bass)
+    data = _eq_band(data, sr, 250, 2000, mid)
+    data = _eq_band(data, sr, 2000, 8000, treble)
+    data = _eq_band(data, sr, 4000, 12000, presence)
+    return data
 
-    elif voice == "chipmunk":
-        pitch = 1.8
 
-    # Pitch
-    if pitch != 1.0:
-        new_length = int(len(data) / pitch)
-        if new_length > 0:
-            data = resample(data, new_length)
+def _add_harmonics(data: np.ndarray, amount: float) -> np.ndarray:
+    if amount <= 0:
+        return data
+    harmonic2 = np.sin(np.pi * data / 32768.0) * 32768.0
+    harmonic3 = np.sin(2 * np.pi * data / 32768.0) * 32768.0
+    return data + harmonic2 * amount * 0.5 + harmonic3 * amount * 0.25
 
-    # Speed
-    if speed != 1.0 and speed > 0:
-        new_length = int(len(data) / speed)
-        if new_length > 0:
-            data = resample(data, new_length)
 
-    max_val = np.max(np.abs(data))
-    if max_val > 0:
-        data = data / max_val * 32767
+def _add_breathiness(data: np.ndarray, sr: int, amount: float) -> np.ndarray:
+    if amount <= 0:
+        return data
+    noise = np.random.randn(len(data)) * 32768 * 0.3
+    # Shape noise to vocal frequency range
+    nyq = sr / 2.0
+    try:
+        sos = butter(2, [800 / nyq, min(6000 / nyq, 0.999)], btype="band", output="sos")
+        noise = sosfilt(sos, noise)
+    except ValueError:
+        pass
+    return data * (1 - amount * 0.3) + noise * amount
 
-    data = data.astype(np.int16)
 
-    file_id = str(uuid.uuid4())
-    output_path = os.path.join(OUTPUT_DIR, f"{file_id}_voice.wav")
-    wavfile.write(output_path, sample_rate, data)
+def _add_vibrato(data: np.ndarray, sr: int, rate: float,
+                 depth: float) -> np.ndarray:
+    if rate <= 0 or depth <= 0:
+        return data
+    t = np.arange(len(data), dtype=np.float64) / sr
+    max_shift = depth * sr * 0.005  # up to ~5ms at full depth
+    lfo = max_shift * np.sin(2 * np.pi * rate * t)
+    indices = np.arange(len(data), dtype=np.float64) + lfo
+    indices = np.clip(indices, 0, len(data) - 1)
+    idx_floor = indices.astype(int)
+    frac = indices - idx_floor
+    idx_ceil = np.minimum(idx_floor + 1, len(data) - 1)
+    return data[idx_floor] * (1 - frac) + data[idx_ceil] * frac
 
-    os.remove(wav_path)
-    return output_path
+
+def _compress(data: np.ndarray, amount: float) -> np.ndarray:
+    if amount <= 0:
+        return data
+    threshold = 32768 * (1 - amount * 0.8)
+    ratio = 1 + amount * 7  # 1:1 to 1:8
+    out = np.copy(data)
+    mask = np.abs(out) > threshold
+    sign = np.sign(out[mask])
+    above = np.abs(out[mask]) - threshold
+    out[mask] = sign * (threshold + above / ratio)
+    return out
+
+
+def _distort(data: np.ndarray, amount: float) -> np.ndarray:
+    if amount <= 0:
+        return data
+    gain = 1 + amount * 10
+    return np.tanh(data / 32768.0 * gain) * 32768
+
+
+def _robot_effect(data: np.ndarray, sr: int) -> np.ndarray:
+    """Ring modulation + bit-crushing for robotic sound."""
+    t = np.arange(len(data), dtype=np.float64) / sr
+    carrier = np.sin(2 * np.pi * 150 * t)
+    data = data * carrier
+    levels = 64
+    data = np.round(data / (32768 / levels)) * (32768 / levels)
+    return data
+
+
+# ---------------------------------------------------------------------------
+# Main synthesis function
+# ---------------------------------------------------------------------------
+
+async def synthesize_voice(input_path: str, params: dict) -> str:
+    sr, raw = _read_audio(input_path)
+    data = _to_mono_float(raw)
+
+    preset_id = params.get("preset", "custom")
+    preset_params = {}
+    for p in VOICE_PRESETS:
+        if p["id"] == preset_id:
+            preset_params = dict(p["params"])
+            break
+
+    # User params override preset
+    merged = {**preset_params, **{k: v for k, v in params.items() if k != "preset"}}
+
+    pitch_shift = float(merged.get("pitch_shift", 0))
+    formant = float(merged.get("formant_shift", 0))
+    bass = float(merged.get("bass", 0))
+    mid = float(merged.get("mid", 0))
+    treble = float(merged.get("treble", 0))
+    presence = float(merged.get("presence", 0))
+    harmonics = float(merged.get("harmonics", 0))
+    breathiness = float(merged.get("breathiness", 0))
+    vibrato_rate = float(merged.get("vibrato_rate", 0))
+    vibrato_depth = float(merged.get("vibrato_depth", 0))
+    compression = float(merged.get("compression", 0))
+    distortion = float(merged.get("distortion", 0))
+
+    # Processing chain order matters:
+    # 1. Formant shift (changes voice character without changing pitch)
+    data = _formant_shift(data, sr, formant)
+
+    # 2. Pitch shift
+    data = _pitch_shift(data, pitch_shift)
+
+    # 3. EQ (bass, mid, treble, presence)
+    data = _apply_eq(data, sr, bass, mid, treble, presence)
+
+    # 4. Harmonics
+    data = _add_harmonics(data, harmonics)
+
+    # 5. Breathiness
+    data = _add_breathiness(data, sr, breathiness)
+
+    # 6. Vibrato
+    data = _add_vibrato(data, sr, vibrato_rate, vibrato_depth)
+
+    # 7. Robot effect (if preset is robot, apply ring mod)
+    if preset_id == "robot":
+        data = _robot_effect(data, sr)
+
+    # 8. Distortion
+    data = _distort(data, distortion)
+
+    # 9. Compression
+    data = _compress(data, compression)
+
+    return _save_wav(data, sr, "voice")
