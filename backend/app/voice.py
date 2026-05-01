@@ -1,6 +1,8 @@
 import os
+import re
 import uuid
 import wave
+import random
 import numpy as np
 from scipy.io import wavfile
 from scipy.signal import resample, butter, sosfilt, lfilter
@@ -129,6 +131,266 @@ VOICE_PRESETS = [
 
 def list_presets() -> list[dict]:
     return VOICE_PRESETS
+
+
+# ---------------------------------------------------------------------------
+# AI voice manufacturing — keyword-to-DSP parameter mapping
+# ---------------------------------------------------------------------------
+
+# Each keyword maps to partial DSP parameter overrides and a weight.
+# When multiple keywords match, their parameters are blended.
+_VOICE_KEYWORDS: dict[str, dict] = {
+    # Pitch / register
+    "deep": {"pitch_shift": -7, "formant_shift": -5, "bass": 6, "treble": -3},
+    "low": {"pitch_shift": -5, "formant_shift": -3, "bass": 4},
+    "bass": {"pitch_shift": -4, "bass": 8, "treble": -4},
+    "baritone": {"pitch_shift": -3, "formant_shift": -2, "bass": 5, "mid": 2},
+    "high": {"pitch_shift": 5, "formant_shift": 3, "treble": 4, "bass": -3},
+    "bright": {"pitch_shift": 3, "treble": 5, "presence": 4},
+    "soprano": {"pitch_shift": 7, "formant_shift": 5, "treble": 4, "bass": -4},
+    "tenor": {"pitch_shift": 1, "formant_shift": 1, "mid": 3, "presence": 2},
+    "alto": {"pitch_shift": -1, "formant_shift": -1, "mid": 2, "bass": 2},
+
+    # Gender / age
+    "male": {"pitch_shift": -4, "formant_shift": -3, "bass": 4},
+    "female": {"pitch_shift": 4, "formant_shift": 3, "treble": 3, "presence": 2},
+    "child": {"pitch_shift": 8, "formant_shift": 6, "bass": -6, "treble": 5, "presence": 4},
+    "kid": {"pitch_shift": 8, "formant_shift": 6, "bass": -6, "treble": 5, "presence": 4},
+    "old": {"pitch_shift": -2, "breathiness": 0.3, "vibrato_rate": 4, "vibrato_depth": 0.2, "treble": -2},
+    "elderly": {"pitch_shift": -2, "breathiness": 0.3, "vibrato_rate": 4, "vibrato_depth": 0.2},
+    "young": {"pitch_shift": 3, "formant_shift": 2, "treble": 2, "presence": 3},
+
+    # Character types
+    "robot": {"harmonics": 0.7, "compression": 0.9, "vibrato_rate": 0, "breathiness": 0, "treble": 3},
+    "robotic": {"harmonics": 0.7, "compression": 0.9, "vibrato_rate": 0, "breathiness": 0, "treble": 3},
+    "mechanical": {"harmonics": 0.6, "compression": 0.8, "distortion": 0.2, "treble": 2},
+    "android": {"harmonics": 0.5, "compression": 0.7, "formant_shift": 2, "treble": 3},
+    "monster": {"pitch_shift": -10, "formant_shift": -8, "bass": 8, "treble": -4, "distortion": 0.6, "harmonics": 0.5},
+    "demon": {"pitch_shift": -10, "formant_shift": -6, "bass": 10, "distortion": 0.7, "harmonics": 0.6},
+    "devil": {"pitch_shift": -8, "formant_shift": -6, "bass": 8, "distortion": 0.5, "harmonics": 0.5},
+    "alien": {"formant_shift": 7, "vibrato_rate": 8, "vibrato_depth": 0.4, "harmonics": 0.4, "treble": 6, "presence": 5},
+    "extraterrestrial": {"formant_shift": 7, "vibrato_rate": 8, "vibrato_depth": 0.4, "harmonics": 0.4},
+    "ghost": {"breathiness": 0.5, "treble": 4, "presence": 3, "bass": -6, "compression": 0.2},
+    "spirit": {"breathiness": 0.5, "treble": 4, "presence": 3, "bass": -6},
+    "fairy": {"pitch_shift": 8, "formant_shift": 6, "treble": 6, "vibrato_rate": 5, "vibrato_depth": 0.3, "breathiness": 0.2},
+    "angel": {"pitch_shift": 5, "treble": 4, "breathiness": 0.3, "vibrato_rate": 3, "vibrato_depth": 0.2},
+    "villain": {"pitch_shift": -5, "formant_shift": -4, "bass": 6, "distortion": 0.3, "compression": 0.6},
+    "hero": {"pitch_shift": -2, "bass": 3, "mid": 3, "presence": 4, "compression": 0.5},
+    "narrator": {"bass": 3, "mid": 2, "presence": 3, "compression": 0.5},
+    "announcer": {"bass": 4, "mid": 2, "presence": 5, "compression": 0.7},
+
+    # Texture / quality
+    "whisper": {"breathiness": 0.6, "bass": -4, "treble": 2, "compression": 0.3, "harmonics": 0},
+    "whispery": {"breathiness": 0.5, "bass": -3, "treble": 2, "compression": 0.3},
+    "breathy": {"breathiness": 0.4, "bass": -2, "treble": 2},
+    "airy": {"breathiness": 0.3, "treble": 3, "presence": 3, "bass": -3},
+    "smooth": {"bass": 2, "treble": -2, "compression": 0.4, "breathiness": 0.1},
+    "silky": {"bass": 1, "treble": -1, "compression": 0.3, "breathiness": 0.15},
+    "rough": {"distortion": 0.4, "bass": 3, "harmonics": 0.3},
+    "raspy": {"distortion": 0.35, "bass": 2, "harmonics": 0.3, "breathiness": 0.2},
+    "gravelly": {"distortion": 0.4, "bass": 4, "pitch_shift": -3, "harmonics": 0.3},
+    "gritty": {"distortion": 0.3, "harmonics": 0.3, "bass": 3},
+    "crisp": {"treble": 5, "presence": 4, "compression": 0.5},
+    "clear": {"treble": 3, "presence": 3, "compression": 0.4, "bass": -1},
+    "warm": {"bass": 4, "mid": 2, "treble": -2},
+    "dark": {"bass": 5, "treble": -5, "pitch_shift": -2},
+    "muffled": {"bass": 3, "treble": -8, "presence": -6},
+    "nasal": {"mid": 8, "bass": -4, "formant_shift": 3},
+    "metallic": {"harmonics": 0.6, "treble": 5, "presence": 5, "distortion": 0.2},
+    "hollow": {"mid": -4, "bass": 3, "treble": 3, "breathiness": 0.2},
+    "thin": {"bass": -8, "treble": 4, "presence": 3, "formant_shift": 3},
+    "thick": {"bass": 6, "mid": 3, "formant_shift": -2, "compression": 0.4},
+    "boomy": {"bass": 10, "mid": -2, "treble": -4},
+    "tinny": {"bass": -10, "treble": 8, "presence": 4},
+
+    # Emotional / stylistic
+    "scary": {"pitch_shift": -6, "distortion": 0.4, "bass": 6, "vibrato_rate": 2, "vibrato_depth": 0.2},
+    "creepy": {"pitch_shift": -4, "distortion": 0.3, "vibrato_rate": 3, "vibrato_depth": 0.15, "breathiness": 0.2},
+    "eerie": {"formant_shift": 5, "vibrato_rate": 4, "vibrato_depth": 0.3, "treble": 4},
+    "ethereal": {"pitch_shift": 4, "breathiness": 0.3, "treble": 5, "vibrato_rate": 3, "vibrato_depth": 0.2},
+    "dreamy": {"breathiness": 0.3, "treble": 3, "vibrato_rate": 2, "vibrato_depth": 0.15, "compression": 0.3},
+    "powerful": {"bass": 4, "compression": 0.8, "distortion": 0.15, "presence": 4},
+    "gentle": {"breathiness": 0.2, "compression": 0.3, "treble": 1, "bass": -1},
+    "aggressive": {"distortion": 0.5, "bass": 5, "compression": 0.7, "pitch_shift": -3},
+    "angry": {"distortion": 0.4, "bass": 4, "compression": 0.7, "pitch_shift": -2, "presence": 4},
+    "calm": {"compression": 0.3, "breathiness": 0.15, "bass": 1, "treble": -1},
+    "sad": {"pitch_shift": -2, "bass": 2, "treble": -2, "vibrato_rate": 2, "vibrato_depth": 0.1},
+    "happy": {"pitch_shift": 2, "treble": 3, "presence": 3, "vibrato_rate": 3, "vibrato_depth": 0.1},
+    "excited": {"pitch_shift": 3, "treble": 4, "presence": 4, "vibrato_rate": 4, "vibrato_depth": 0.15},
+
+    # Effects / processing style
+    "radio": {"bass": -12, "treble": -8, "mid": 6, "presence": 4, "compression": 0.7, "distortion": 0.15},
+    "telephone": {"bass": -12, "treble": -8, "mid": 6, "presence": 4, "compression": 0.7, "distortion": 0.15},
+    "underwater": {"bass": 6, "treble": -10, "presence": -8, "vibrato_rate": 2, "vibrato_depth": 0.1},
+    "megaphone": {"mid": 6, "bass": -6, "treble": -4, "compression": 0.8, "distortion": 0.3},
+    "echo": {"vibrato_rate": 1, "vibrato_depth": 0.05, "breathiness": 0.15},
+    "distorted": {"distortion": 0.6, "harmonics": 0.4, "compression": 0.6},
+    "compressed": {"compression": 0.8, "bass": 1, "presence": 2},
+    "saturated": {"distortion": 0.3, "harmonics": 0.5, "compression": 0.5},
+    "clean": {"compression": 0.2, "distortion": 0, "harmonics": 0},
+}
+
+# Parameter ranges for clipping
+_PARAM_RANGES = {
+    "pitch_shift": (-12, 12),
+    "formant_shift": (-12, 12),
+    "bass": (-12, 12),
+    "mid": (-12, 12),
+    "treble": (-12, 12),
+    "presence": (-12, 12),
+    "harmonics": (0, 1),
+    "breathiness": (0, 1),
+    "vibrato_rate": (0, 12),
+    "vibrato_depth": (0, 1),
+    "compression": (0, 1),
+    "distortion": (0, 1),
+}
+
+_DEFAULTS = {k: 0 for k in _PARAM_RANGES}
+
+
+def _clip_params(params: dict) -> dict:
+    out = {}
+    for k, v in params.items():
+        if k in _PARAM_RANGES:
+            lo, hi = _PARAM_RANGES[k]
+            out[k] = max(lo, min(hi, round(v, 2)))
+    return out
+
+
+def _tokenize(text: str) -> list[str]:
+    return re.findall(r"[a-z]+", text.lower())
+
+
+def ai_generate_params(description: str) -> dict:
+    """Map a natural-language voice description to DSP parameters.
+
+    Scans the description for known keywords and blends their parameter
+    contributions.  Returns a dict with all 12 DSP keys.
+    """
+    tokens = _tokenize(description)
+    # Also try 2-word combos for compound terms
+    bigrams = [f"{tokens[i]}{tokens[i+1]}" for i in range(len(tokens) - 1)]
+    all_terms = tokens + bigrams
+
+    accumulator: dict[str, list[float]] = {k: [] for k in _PARAM_RANGES}
+    matched_any = False
+
+    for term in all_terms:
+        if term in _VOICE_KEYWORDS:
+            matched_any = True
+            for k, v in _VOICE_KEYWORDS[term].items():
+                if k in accumulator:
+                    accumulator[k].append(v)
+
+    if not matched_any:
+        # Fall back to a random voice so the user always gets something
+        return random_voice_params()
+
+    result = dict(_DEFAULTS)
+    for k, values in accumulator.items():
+        if values:
+            result[k] = sum(values) / len(values)
+
+    return _clip_params(result)
+
+
+def random_voice_params() -> dict:
+    """Generate a random but musically-sensible set of DSP parameters."""
+    params = {
+        "pitch_shift": random.uniform(-8, 8),
+        "formant_shift": random.uniform(-6, 6),
+        "bass": random.uniform(-8, 8),
+        "mid": random.uniform(-4, 4),
+        "treble": random.uniform(-6, 6),
+        "presence": random.uniform(-4, 6),
+        "harmonics": random.uniform(0, 0.6),
+        "breathiness": random.uniform(0, 0.4),
+        "vibrato_rate": random.choice([0, 0, 0, random.uniform(1, 8)]),
+        "vibrato_depth": random.uniform(0, 0.3),
+        "compression": random.uniform(0, 0.7),
+        "distortion": random.choice([0, 0, 0, random.uniform(0, 0.4)]),
+    }
+    return _clip_params(params)
+
+
+def analyze_audio_characteristics(data: np.ndarray, sr: int) -> dict:
+    """Analyze audio and return descriptive characteristics."""
+    mono = data.astype(np.float64)
+    if len(mono.shape) > 1:
+        mono = mono.mean(axis=1)
+
+    # RMS energy
+    rms = float(np.sqrt(np.mean(mono ** 2)))
+
+    # Spectral centroid (brightness indicator)
+    fft = np.abs(np.fft.rfft(mono))
+    freqs = np.fft.rfftfreq(len(mono), 1.0 / sr)
+    total = fft.sum()
+    centroid = float(freqs @ fft / total) if total > 0 else 0
+
+    # Dominant frequency
+    dominant_freq = float(freqs[np.argmax(fft)])
+
+    # Spectral rolloff (frequency below which 85% of energy)
+    cumsum = np.cumsum(fft)
+    rolloff_idx = np.searchsorted(cumsum, 0.85 * total)
+    rolloff = float(freqs[min(rolloff_idx, len(freqs) - 1)])
+
+    # Energy distribution across bands
+    bass_mask = freqs < 250
+    mid_mask = (freqs >= 250) & (freqs < 2000)
+    treble_mask = freqs >= 2000
+    bass_energy = float(fft[bass_mask].sum() / total) if total > 0 else 0
+    mid_energy = float(fft[mid_mask].sum() / total) if total > 0 else 0
+    treble_energy = float(fft[treble_mask].sum() / total) if total > 0 else 0
+
+    return {
+        "rms": round(rms, 2),
+        "spectral_centroid_hz": round(centroid, 1),
+        "dominant_freq_hz": round(dominant_freq, 1),
+        "spectral_rolloff_hz": round(rolloff, 1),
+        "bass_energy": round(bass_energy, 3),
+        "mid_energy": round(mid_energy, 3),
+        "treble_energy": round(treble_energy, 3),
+        "duration_s": round(len(mono) / sr, 2),
+    }
+
+
+def ai_suggest_from_analysis(analysis: dict) -> dict:
+    """Given audio analysis, suggest DSP params that create a contrasting voice."""
+    params = dict(_DEFAULTS)
+
+    centroid = analysis.get("spectral_centroid_hz", 1000)
+    bass_e = analysis.get("bass_energy", 0.33)
+    treble_e = analysis.get("treble_energy", 0.33)
+
+    # If source is bass-heavy, suggest a brighter transformation
+    if bass_e > 0.5:
+        params["pitch_shift"] = 4
+        params["formant_shift"] = 3
+        params["treble"] = 4
+        params["bass"] = -3
+    # If source is treble-heavy, suggest deeper transformation
+    elif treble_e > 0.4:
+        params["pitch_shift"] = -5
+        params["formant_shift"] = -3
+        params["bass"] = 5
+        params["treble"] = -3
+
+    # If centroid is low, brighten; if high, deepen
+    if centroid < 500:
+        params["presence"] = 4
+        params["treble"] = max(params.get("treble", 0), 3)
+    elif centroid > 2000:
+        params["bass"] = max(params.get("bass", 0), 4)
+        params["pitch_shift"] = min(params.get("pitch_shift", 0), -3)
+
+    # Add some character
+    params["harmonics"] = 0.2
+    params["compression"] = 0.4
+
+    return _clip_params(params)
 
 
 # ---------------------------------------------------------------------------

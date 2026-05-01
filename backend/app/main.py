@@ -11,7 +11,12 @@ import json
 _file_registry: dict[str, str] = {}
 
 from app.scraper import scrape_audio_resources, search_audio_topics
-from app.voice import synthesize_voice, list_presets
+from app.voice import (
+    synthesize_voice, list_presets,
+    ai_generate_params, random_voice_params,
+    analyze_audio_characteristics, ai_suggest_from_analysis,
+    _read_audio, _to_mono_float,
+)
 from app.chat import chat_response
 from app.studio import (
     process_audio,
@@ -80,6 +85,54 @@ async def synthesize(file: UploadFile = File(...), settings: str = Form("{}")):
     params = json.loads(settings)
     output_path = await synthesize_voice(input_path, params)
     return FileResponse(output_path, media_type="audio/wav", filename="synthesized_voice.wav")
+
+
+class AIVoiceRequest(BaseModel):
+    description: str = ""
+    mode: str = "describe"  # "describe", "random", or "analyze"
+
+
+@app.post("/api/voice/ai-generate")
+async def ai_generate(
+    file: UploadFile = File(...),
+    description: str = Form(""),
+    mode: str = Form("describe"),
+):
+    file_id = str(uuid.uuid4())
+    safe_name = os.path.basename(file.filename or "audio.wav")
+    input_path = os.path.join(UPLOAD_DIR, f"{file_id}_{safe_name}")
+    with open(input_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    analysis = None
+    if mode == "random":
+        params = random_voice_params()
+    elif mode == "analyze":
+        sr, raw = _read_audio(input_path)
+        data = _to_mono_float(raw)
+        analysis = analyze_audio_characteristics(data, sr)
+        params = ai_suggest_from_analysis(analysis)
+    else:
+        params = ai_generate_params(description) if description.strip() else random_voice_params()
+
+    output_path = await synthesize_voice(input_path, params)
+    return {
+        "audio_url": f"/api/voice/ai-download/{os.path.basename(output_path)}",
+        "params": params,
+        "analysis": analysis,
+        "mode": mode,
+        "description": description,
+    }
+
+
+@app.get("/api/voice/ai-download/{filename}")
+async def ai_download(filename: str):
+    safe_name = os.path.basename(filename)
+    path = os.path.join(OUTPUT_DIR, safe_name)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(path, media_type="audio/wav", filename="ai_voice.wav")
 
 
 # --- AI Chat ---
