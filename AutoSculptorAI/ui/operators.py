@@ -274,6 +274,12 @@ class AUTOSCULPT_OT_ExtractTexture(Operator):
         if provider == "OPENAI":
             config["api_key"] = prefs_data.openai_api_key
             config["model"] = prefs_data.openai_model
+        elif provider == "ANTHROPIC":
+            config["api_key"] = prefs_data.anthropic_api_key
+            config["model"] = prefs_data.anthropic_model
+        elif provider == "OLLAMA":
+            config["ollama_url"] = prefs_data.ollama_url
+            config["model"] = prefs_data.ollama_model
 
         from ..core.texture_engine import TextureEngine
 
