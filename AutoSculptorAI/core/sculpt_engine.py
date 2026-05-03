@@ -18,6 +18,7 @@ class SculptEngine:
         self.symmetry = config.get("symmetry", True)
         self.ref_image_path = config.get("ref_image_path")
         self.use_knowledge = config.get("use_knowledge", False)
+        self.knowledge_db_path = config.get("knowledge_db_path")
 
     def generate(self):
         try:
@@ -28,7 +29,7 @@ class SculptEngine:
 
             knowledge_context = None
             if self.use_knowledge:
-                kb = KnowledgeBase()
+                kb = KnowledgeBase(db_path=self.knowledge_db_path)
                 knowledge_context = kb.get_relevant_knowledge(self.prompt)
 
             enhanced_prompt = self._enhance_prompt(self.prompt)

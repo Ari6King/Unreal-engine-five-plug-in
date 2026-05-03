@@ -69,6 +69,7 @@ class AUTOSCULPT_OT_Generate(Operator):
             "symmetry": scene.autosculpt_symmetry,
             "ref_image_path": ref_image_path,
             "use_knowledge": scene.autosculpt_scrape_knowledge,
+            "knowledge_db_path": bpy.path.abspath(prefs_data.knowledge_db_path) if prefs_data.knowledge_db_path else None,
         }
 
         if provider == "OPENAI":
@@ -99,6 +100,13 @@ class AUTOSCULPT_OT_Generate(Operator):
     def modal(self, context, event):
         if event.type != "TIMER":
             return {"PASS_THROUGH"}
+
+        if not AUTOSCULPT_OT_Generate._running:
+            context.window_manager.event_timer_remove(self._timer)
+            AUTOSCULPT_OT_Generate._thread = None
+            AUTOSCULPT_OT_Generate._result = None
+            AUTOSCULPT_OT_Generate._error = None
+            return {"CANCELLED"}
 
         scene = context.scene
 
